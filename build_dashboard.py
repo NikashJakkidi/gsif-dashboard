@@ -25,6 +25,15 @@ PERF_SECTOR_NAMES = [
 PERF_NONRDP, PERF_SECTOR, PERF_VERTICAL = 3, 4, 7
 PERF_RETURN, PERF_EXCESS, PERF_COMPANY = 11, 12, 13
 
+DAILY_TRACKER_PATH = r"C:\Users\nikas\OneDrive - University of Florida\GSIF General Body Archive (2026)\Portfolio Tools\Daily Return Streams Tool.xlsx"
+DAILY_SECTOR_ORDER = [
+    "Communication Services", "Consumer Discretionary", "Consumer Staples",
+    "Energy", "Utilities", "Financials", "Real Estate", "Health Care",
+    "Industrials", "Materials", "Information Technology", "Fund",
+]
+DAILY_DATE_ROW, DAILY_FIRST_DAY_COL = 5, 3
+DAILY_BENCH_ROW_BASE, DAILY_PORT_ROW_BASE = 6, 20
+
 
 def load_gsif_data(path):
     wb = openpyxl.load_workbook(path, data_only=True)
@@ -155,6 +164,35 @@ def load_performance_data(path):
     return {"months": months, "sector_names": PERF_SECTOR_NAMES, "data": by_month}
 
 
+def load_daily_return_data(path):
+    wb = openpyxl.load_workbook(path, data_only=True)
+    months = sorted(
+        (n for n in wb.sheetnames if parse_month_name(n)),
+        key=parse_month_name,
+    )
+
+    series = {name: [] for name in DAILY_SECTOR_ORDER}
+    for month in months:
+        ws = wb[month]
+        col = DAILY_FIRST_DAY_COL
+        while ws.cell(DAILY_DATE_ROW, col).value is not None:
+            date_val = ws.cell(DAILY_DATE_ROW, col).value
+            for i, sector_name in enumerate(DAILY_SECTOR_ORDER):
+                bench_val = ws.cell(DAILY_BENCH_ROW_BASE + i, col).value
+                port_val = ws.cell(DAILY_PORT_ROW_BASE + i, col).value
+                bench_ok = isinstance(bench_val, (int, float)) and bench_val != 0
+                port_ok = isinstance(port_val, (int, float)) and port_val != 0
+                if bench_ok and port_ok:
+                    series[sector_name].append({
+                        "date": to_date_str(date_val),
+                        "benchmark_return": bench_val,
+                        "sector_return": port_val,
+                    })
+            col += 1
+
+    return {"sectors": DAILY_SECTOR_ORDER, "series": series}
+
+
 def to_date_str(value):
     return value.strftime("%Y-%m-%d") if hasattr(value, "strftime") else str(value)
 
@@ -230,6 +268,7 @@ def build_dashboard_data():
         },
         "sectors": sectors,
         "performance": load_performance_data(PERF_TRACKER_PATH),
+        "daily": load_daily_return_data(DAILY_TRACKER_PATH),
     }
 
 

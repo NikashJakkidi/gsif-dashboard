@@ -143,6 +143,7 @@
     <button class="tab-btn active" data-tab="fund">Fund-Wide</button>
     <button class="tab-btn" data-tab="sector">Sector-Level</button>
     <button class="tab-btn" data-tab="perf">Performance</button>
+    <button class="tab-btn" data-tab="daily">Daily Risk/Returns</button>
   </div>
 </nav>
 
@@ -315,9 +316,46 @@
     </div>
   </section>
 
+  <section id="panel-daily" class="panel">
+    <div class="panel-toolbar">
+      <label for="dailySectorSelect">Sector</label>
+      <select id="dailySectorSelect"></select>
+      <label for="dailyStartInput">From</label>
+      <input type="date" id="dailyStartInput">
+      <label for="dailyEndInput">To</label>
+      <input type="date" id="dailyEndInput">
+    </div>
+
+    <div class="stat-row" style="grid-template-columns: repeat(3, 1fr);">
+      <div class="stat-tile">
+        <div class="stat-label">Beta</div>
+        <div class="stat-value" id="dailyBeta">—</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Tracking Error</div>
+        <div class="stat-value" id="dailyTE">—</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Beta-Adjusted Tracking Error</div>
+        <div class="stat-value" id="dailyIdio">—</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 id="dailyChartTitle">Cumulative Return</h2>
+      <div class="card-note">Sector vs. benchmark cumulative return, shaded band shows excess return</div>
+      <div class="legend-inline">
+        <span><span class="legend-swatch" style="background:var(--brand-blue)"></span>Sector Return</span>
+        <span><span class="legend-swatch" style="background:var(--brand-orange)"></span>Benchmark Return</span>
+        <span><span class="legend-swatch" style="background:var(--diverge-pos); opacity:.4"></span>Excess Return</span>
+      </div>
+      <div class="chart-wrap" style="height:62vh; min-height:420px;"><canvas id="chartDaily"></canvas></div>
+    </div>
+  </section>
+
 </main>
 
-<footer>Data sourced from the GSIF Official Portfolio Tracker, S&amp;P 1000 Tracker, and Performance Tracker (locked, read-only workbooks). Figures reflect end-point values as of the date above.</footer>
+<footer>Data sourced from the GSIF Official Portfolio Tracker, S&amp;P 1000 Tracker, Performance Tracker, and Daily Return Streams Tool (locked, read-only workbooks). Figures reflect end-point values as of the date above.</footer>
 
 <script>
 const DATA = __DASHBOARD_DATA__;
@@ -754,6 +792,157 @@ perfSectorSelect.addEventListener('change', renderPerf);
 perfStartSelect.addEventListener('change', () => { clampPerfRange('start'); renderPerf(); });
 perfEndSelect.addEventListener('change', () => { clampPerfRange('end'); renderPerf(); });
 renderPerf();
+
+// ---- Daily Risk/Returns tab ----
+const DAILY = DATA.daily;
+
+function dailyRowsInRange(sector, start, end) {
+  return (DAILY.series[sector] || []).filter(r => r.date >= start && r.date <= end);
+}
+
+function computeBeta(rows) {
+  const n = rows.length;
+  if (n < 2) return null;
+  const bench = rows.map(r => r.benchmark_return);
+  const sect = rows.map(r => r.sector_return);
+  const meanB = bench.reduce((a, b) => a + b, 0) / n;
+  const meanS = sect.reduce((a, b) => a + b, 0) / n;
+  let cov = 0, varB = 0;
+  for (let i = 0; i < n; i++) {
+    cov += (bench[i] - meanB) * (sect[i] - meanS);
+    varB += (bench[i] - meanB) ** 2;
+  }
+  if (varB === 0) return null;
+  return cov / varB;
+}
+function sampleStdev(values) {
+  const n = values.length;
+  if (n < 2) return null;
+  const mean = values.reduce((a, b) => a + b, 0) / n;
+  const sumSq = values.reduce((a, v) => a + (v - mean) ** 2, 0);
+  return Math.sqrt(sumSq / (n - 1));
+}
+function cumulativeReturnSeries(returns) {
+  let product = 1;
+  return returns.map(r => { product *= (1 + r); return product - 1; });
+}
+
+const dailySectorSelect = document.getElementById('dailySectorSelect');
+const dailyStartInput = document.getElementById('dailyStartInput');
+const dailyEndInput = document.getElementById('dailyEndInput');
+let dailyChart = null;
+
+DAILY.sectors.forEach(s => {
+  const o = document.createElement('option');
+  o.value = s; o.textContent = s;
+  dailySectorSelect.appendChild(o);
+});
+dailySectorSelect.value = DAILY.sectors.includes('Fund') ? 'Fund' : DAILY.sectors[0];
+
+function setDailyDateBounds(sector, keepSelection) {
+  const rows = DAILY.series[sector] || [];
+  if (!rows.length) return;
+  const first = rows[0].date, last = rows[rows.length - 1].date;
+  dailyStartInput.min = first; dailyStartInput.max = last;
+  dailyEndInput.min = first; dailyEndInput.max = last;
+  if (!keepSelection) {
+    dailyStartInput.value = first;
+    dailyEndInput.value = last;
+  } else {
+    if (dailyStartInput.value < first) dailyStartInput.value = first;
+    if (dailyEndInput.value > last) dailyEndInput.value = last;
+  }
+}
+setDailyDateBounds(dailySectorSelect.value, false);
+
+function renderDaily() {
+  const sector = dailySectorSelect.value;
+  const start = dailyStartInput.value;
+  const end = dailyEndInput.value;
+  const rows = dailyRowsInRange(sector, start, end);
+
+  const beta = computeBeta(rows);
+  const excess = rows.map(r => r.sector_return - r.benchmark_return);
+  const te = sampleStdev(excess);
+  const teAnn = te === null ? null : te * Math.sqrt(252);
+  const alpha = (beta === null) ? null : rows.map(r => r.sector_return - beta * r.benchmark_return);
+  const idioAnn = alpha === null ? null : (sampleStdev(alpha) * Math.sqrt(252));
+
+  document.getElementById('dailyBeta').textContent = beta === null ? '—' : beta.toFixed(3);
+  document.getElementById('dailyTE').textContent = teAnn === null ? '—' : fmtPct(teAnn, 2);
+  document.getElementById('dailyIdio').textContent = idioAnn === null ? '—' : fmtPct(idioAnn, 2);
+  document.getElementById('dailyChartTitle').textContent = sector + ' — Cumulative Return';
+
+  const dates = rows.map(r => r.date);
+  const sectorCum = cumulativeReturnSeries(rows.map(r => r.sector_return)).map(v => v * 100);
+  const benchCum = cumulativeReturnSeries(rows.map(r => r.benchmark_return)).map(v => v * 100);
+
+  if (dailyChart) dailyChart.destroy();
+  dailyChart = new Chart(document.getElementById('chartDaily'), {
+    type: 'line',
+    data: {
+      labels: dates,
+      datasets: [
+        {
+          label: 'Benchmark Return',
+          data: benchCum,
+          borderColor: PAL.orange,
+          backgroundColor: PAL.orange,
+          pointRadius: 0,
+          borderWidth: 2,
+          tension: 0,
+          fill: false,
+          order: 2,
+        },
+        {
+          label: 'Sector Return',
+          data: sectorCum,
+          borderColor: PAL.blue,
+          backgroundColor: isDark ? 'rgba(57,135,229,0.16)' : 'rgba(42,120,214,0.14)',
+          pointRadius: 0,
+          borderWidth: 2,
+          tension: 0,
+          fill: 0,
+          order: 1,
+        },
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(2) + '%',
+            afterBody: (items) => {
+              if (items.length < 2) return '';
+              const s = items.find(i => i.dataset.label === 'Sector Return');
+              const b = items.find(i => i.dataset.label === 'Benchmark Return');
+              if (!s || !b) return '';
+              return 'Excess: ' + (s.parsed.y - b.parsed.y).toFixed(2) + '%';
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: PAL.muted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 20 }, grid: { display: false } },
+        y: { ticks: { callback: v => v + '%', color: PAL.muted }, grid: { color: PAL.grid } }
+      }
+    }
+  });
+}
+
+dailySectorSelect.addEventListener('change', () => { setDailyDateBounds(dailySectorSelect.value, false); renderDaily(); });
+dailyStartInput.addEventListener('change', () => {
+  if (dailyStartInput.value > dailyEndInput.value) dailyEndInput.value = dailyStartInput.value;
+  renderDaily();
+});
+dailyEndInput.addEventListener('change', () => {
+  if (dailyEndInput.value < dailyStartInput.value) dailyStartInput.value = dailyEndInput.value;
+  renderDaily();
+});
+renderDaily();
 </script>
 </body>
 </html>
