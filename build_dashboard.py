@@ -78,6 +78,24 @@ def load_gsif_data(path):
     return holdings, summary, sector_weights
 
 
+def load_vertical_mapping(path):
+    wb = openpyxl.load_workbook(path, data_only=True)
+    ws = wb["Official Vertical Mapping"]
+
+    mapping = []
+    for row in range(2, ws.max_row + 1):
+        sector = ws.cell(row, 1).value
+        if sector is None:
+            continue
+        mapping.append({
+            "sector": sector,
+            "industry": ws.cell(row, 2).value,
+            "subindustry": ws.cell(row, 3).value,
+            "vertical": ws.cell(row, 4).value,
+        })
+    return mapping
+
+
 def load_sp1000_data(path):
     wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb["Hardcode Current S&P 1000"]
@@ -269,6 +287,7 @@ def build_dashboard_data():
         "sectors": sectors,
         "performance": load_performance_data(PERF_TRACKER_PATH),
         "daily": load_daily_return_data(DAILY_TRACKER_PATH),
+        "vertical_mapping": load_vertical_mapping(GSIF_TRACKER_PATH),
     }
 
 

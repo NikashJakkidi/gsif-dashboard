@@ -144,6 +144,7 @@
     <button class="tab-btn" data-tab="sector">Sector-Level</button>
     <button class="tab-btn" data-tab="perf">Performance</button>
     <button class="tab-btn" data-tab="daily">Daily Risk/Returns</button>
+    <button class="tab-btn" data-tab="mapping">Vertical Mapping</button>
   </div>
 </nav>
 
@@ -350,6 +351,31 @@
         <span><span class="legend-swatch" style="background:var(--diverge-pos); opacity:.4"></span>Excess Return</span>
       </div>
       <div class="chart-wrap" style="height:62vh; min-height:420px;"><canvas id="chartDaily"></canvas></div>
+    </div>
+  </section>
+
+  <section id="panel-mapping" class="panel">
+    <div class="panel-toolbar" style="justify-content: flex-start;">
+      <label for="mappingSearch">Search</label>
+      <input type="text" id="mappingSearch" placeholder="Filter by sector, industry, subindustry, or vertical…" style="flex:1; max-width:420px; font-family:inherit; font-size:14px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2); color:var(--text-primary);">
+      <span id="mappingCount" style="font-size:13px; color:var(--text-muted); margin-left:auto;"></span>
+    </div>
+    <div class="card">
+      <h2>Official GICS → GSIF Vertical Mapping</h2>
+      <div class="card-note">The fixed mapping of GICS Sector / Industry / SubIndustry to GSIF's custom Verticals, used consistently across all tools</div>
+      <div style="max-height:65vh; overflow-y:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Sector</th>
+              <th>Industry</th>
+              <th>SubIndustry</th>
+              <th>GSIF Vertical</th>
+            </tr>
+          </thead>
+          <tbody id="mappingTableBody"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
@@ -943,6 +969,32 @@ dailyEndInput.addEventListener('change', () => {
   renderDaily();
 });
 renderDaily();
+
+// ---- Vertical Mapping tab ----
+const MAPPING = DATA.vertical_mapping;
+const mappingSearch = document.getElementById('mappingSearch');
+const mappingTableBody = document.getElementById('mappingTableBody');
+const mappingCount = document.getElementById('mappingCount');
+
+function renderMapping() {
+  const q = mappingSearch.value.trim().toLowerCase();
+  const rows = q
+    ? MAPPING.filter(r => [r.sector, r.industry, r.subindustry, r.vertical].some(v => (v || '').toLowerCase().includes(q)))
+    : MAPPING;
+
+  mappingTableBody.innerHTML = rows.map(r => (
+    '<tr>' +
+      '<td>' + (r.sector || '') + '</td>' +
+      '<td>' + (r.industry || '') + '</td>' +
+      '<td class="vertical-name">' + (r.subindustry || '') + '</td>' +
+      '<td class="ticker">' + (r.vertical || '') + '</td>' +
+    '</tr>'
+  )).join('');
+  mappingCount.textContent = rows.length + ' of ' + MAPPING.length + ' rows';
+}
+
+mappingSearch.addEventListener('input', renderMapping);
+renderMapping();
 </script>
 </body>
 </html>
