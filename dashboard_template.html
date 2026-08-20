@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gator Student Investment Fund — Portfolio Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface-1: #fcfcfb;
+    --surface-2: #ffffff;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --border: rgba(11,11,11,0.10);
+    --grid: #e1e0d9;
+    --brand-blue: #2a78d6;
+    --brand-blue-dark: #184f95;
+    --brand-orange: #eb6834;
+    --diverge-pos: #2a78d6;
+    --diverge-neg: #e34948;
+    --delta-good: #006300;
+    --delta-bad: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface-1: #1a1a19;
+      --surface-2: #202020;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --border: rgba(255,255,255,0.10);
+      --grid: #2c2c2a;
+      --brand-blue: #3987e5;
+      --brand-blue-dark: #104281;
+      --brand-orange: #d95926;
+      --diverge-pos: #3987e5;
+      --diverge-neg: #e66767;
+      --delta-good: #0ca30c;
+      --delta-bad: #e66767;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .header {
+    background: linear-gradient(120deg, var(--brand-blue-dark), var(--brand-blue));
+    color: #ffffff;
+    padding: 28px 36px;
+  }
+  .header-inner { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
+  .header h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+  .header .subtitle { margin-top: 6px; font-size: 13px; opacity: 0.85; }
+  .header .asof { font-size: 12px; opacity: 0.8; text-align: right; }
+  .header .asof strong { display: block; font-size: 13px; opacity: 1; }
+
+  .tabbar { max-width: 1200px; margin: 0 auto; padding: 0 36px; border-bottom: 1px solid var(--border); background: var(--surface-1); }
+  .tabbar-inner { display: flex; gap: 4px; }
+  .tab-btn {
+    appearance: none; border: none; background: none; cursor: pointer;
+    padding: 14px 18px; font-size: 14px; font-weight: 600; color: var(--text-secondary);
+    border-bottom: 3px solid transparent; font-family: inherit;
+  }
+  .tab-btn.active { color: var(--brand-blue); border-bottom-color: var(--brand-blue); }
+  .tab-btn:hover:not(.active) { color: var(--text-primary); }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 28px 36px 60px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .panel-toolbar { display: flex; justify-content: flex-end; align-items: center; margin-bottom: 18px; gap: 10px; }
+  .panel-toolbar label { font-size: 13px; color: var(--text-secondary); font-weight: 600; }
+  select {
+    font-family: inherit; font-size: 14px; padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+  }
+
+  .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-tile {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .stat-label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .stat-value { font-size: 28px; font-weight: 700; margin-top: 6px; color: var(--text-primary); }
+  .stat-delta { font-size: 12.5px; margin-top: 6px; font-weight: 600; }
+  .stat-delta.pos { color: var(--delta-good); }
+  .stat-delta.neg { color: var(--delta-bad); }
+  .stat-delta.flat { color: var(--text-muted); }
+
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 860px) { .chart-row { grid-template-columns: 1fr; } }
+
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; }
+  .card h2 { margin: 0 0 2px; font-size: 15px; font-weight: 700; }
+  .card .card-note { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; }
+  .chart-wrap { position: relative; }
+
+  .legend-inline { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; }
+  .legend-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  thead th {
+    text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--border);
+  }
+  tbody td { padding: 9px 10px; border-bottom: 1px solid var(--grid); }
+  tbody tr:hover { background: rgba(42,120,214,0.06); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.ticker { font-weight: 700; color: var(--brand-blue); }
+  td.vertical-name { color: var(--text-secondary); }
+
+  footer { max-width: 1200px; margin: 0 auto; padding: 0 36px 40px; color: var(--text-muted); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <div>
+      <h1>Gator Student Investment Fund</h1>
+      <div class="subtitle">Portfolio Dashboard</div>
+    </div>
+    <div class="asof">
+      <strong id="asOfLabel">—</strong>
+      <span id="tradeDateLabel"></span>
+    </div>
+  </div>
+</header>
+
+<nav class="tabbar">
+  <div class="tabbar-inner">
+    <button class="tab-btn active" data-tab="fund">Fund-Wide</button>
+    <button class="tab-btn" data-tab="sector">Sector-Level</button>
+  </div>
+</nav>
+
+<main>
+
+  <section id="panel-fund" class="panel active">
+    <div class="stat-row">
+      <div class="stat-tile">
+        <div class="stat-label">Total AUM</div>
+        <div class="stat-value" id="fundAum">—</div>
+        <div class="stat-delta" id="fundAumDelta"></div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Equity Value</div>
+        <div class="stat-value" id="fundEquity">—</div>
+        <div class="stat-delta" id="fundEquityDelta"></div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label"># Total Holdings</div>
+        <div class="stat-value" id="fundHoldings">—</div>
+      </div>
+    </div>
+
+    <div class="chart-row">
+      <div class="card">
+        <h2>Sector Weight in Portfolio</h2>
+        <div class="card-note">Share of fund equity value by GICS sector</div>
+        <div class="chart-wrap" style="height:380px;"><canvas id="chartSectorWeight"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Active Weight vs. Benchmark</h2>
+        <div class="card-note">Portfolio sector weight minus S&amp;P 1000 benchmark sector weight</div>
+        <div class="legend-inline">
+          <span><span class="legend-swatch" style="background:var(--diverge-pos)"></span>Overweight</span>
+          <span><span class="legend-swatch" style="background:var(--diverge-neg)"></span>Underweight</span>
+        </div>
+        <div class="chart-wrap" style="height:346px;"><canvas id="chartActiveWeight"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="panel-sector" class="panel">
+    <div class="panel-toolbar">
+      <label for="sectorSelect">Sector</label>
+      <select id="sectorSelect"></select>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat-tile">
+        <div class="stat-label">Sector AUM</div>
+        <div class="stat-value" id="secAum">—</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label"># Total Holdings</div>
+        <div class="stat-value" id="secHoldings">—</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Active Weight in Fund</div>
+        <div class="stat-value" id="secActiveWeight">—</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Sector Weight in Fund</div>
+        <div class="stat-value" id="secWeightInFund">—</div>
+      </div>
+    </div>
+
+    <div class="chart-row">
+      <div class="card">
+        <h2>Holdings</h2>
+        <div class="card-note">Sorted by vertical, then weight within vertical</div>
+        <div style="max-height:420px; overflow-y:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Company</th>
+                <th>GSIF Vertical</th>
+                <th class="num">Wt. in Sector</th>
+                <th class="num">Wt. in Vertical</th>
+              </tr>
+            </thead>
+            <tbody id="holdingsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Vertical Weight: Portfolio vs. Benchmark</h2>
+        <div class="card-note">Vertical's share of sector, portfolio vs. S&amp;P 1000 benchmark</div>
+        <div class="legend-inline">
+          <span><span class="legend-swatch" style="background:var(--diverge-pos)"></span>Overweight</span>
+          <span><span class="legend-swatch" style="background:var(--diverge-neg)"></span>Underweight</span>
+        </div>
+        <div class="chart-wrap" style="height:346px;"><canvas id="chartVerticalWeight"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>Data sourced from the GSIF Official Portfolio Tracker and S&amp;P 1000 Tracker (locked, read-only workbooks). Figures reflect end-point values as of the date above.</footer>
+
+<script>
+const DATA = __DASHBOARD_DATA__;
+
+const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+const PAL = {
+  blue: isDark ? '#3987e5' : '#2a78d6',
+  orange: isDark ? '#d95926' : '#eb6834',
+  red: isDark ? '#e66767' : '#e34948',
+  textPrimary: isDark ? '#ffffff' : '#0b0b0b',
+  textSecondary: isDark ? '#c3c2b7' : '#52514e',
+  muted: '#898781',
+  grid: isDark ? '#2c2c2a' : '#e1e0d9',
+};
+
+Chart.defaults.font.family = "system-ui, -apple-system, 'Segoe UI', sans-serif";
+Chart.defaults.color = PAL.textSecondary;
+
+function fmtUSD(v) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v || 0);
+}
+function fmtPct(v, digits) {
+  digits = digits === undefined ? 1 : digits;
+  return ((v || 0) * 100).toFixed(digits) + '%';
+}
+function fmtPctSigned(v, digits) {
+  digits = digits === undefined ? 2 : digits;
+  const n = (v || 0) * 100;
+  return (n >= 0 ? '+' : '') + n.toFixed(digits) + '%';
+}
+
+document.getElementById('asOfLabel').textContent = 'As of ' + DATA.as_of_date;
+document.getElementById('tradeDateLabel').textContent = 'Last trade ' + DATA.trade_date;
+
+document.getElementById('fundAum').textContent = fmtUSD(DATA.fund.total_aum);
+document.getElementById('fundEquity').textContent = fmtUSD(DATA.fund.equity_value);
+document.getElementById('fundHoldings').textContent = DATA.fund.num_holdings;
+
+function renderDelta(elId, startVal, endVal) {
+  const el = document.getElementById(elId);
+  const delta = (endVal || 0) - (startVal || 0);
+  const pct = startVal ? delta / startVal : 0;
+  const sign = delta > 0 ? 'pos' : (delta < 0 ? 'neg' : 'flat');
+  const arrow = delta > 0 ? '▲' : (delta < 0 ? '▼' : '—');
+  el.className = 'stat-delta ' + sign;
+  el.textContent = arrow + ' ' + fmtPctSigned(pct) + ' since last trade';
+}
+renderDelta('fundAumDelta', DATA.fund.total_aum_start, DATA.fund.total_aum);
+renderDelta('fundEquityDelta', DATA.fund.equity_value_start, DATA.fund.equity_value);
+
+// ---- Tab switching ----
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ---- Fund-wide charts ----
+new Chart(document.getElementById('chartSectorWeight'), {
+  type: 'bar',
+  data: {
+    labels: DATA.sectors.map(s => s.name),
+    datasets: [{
+      data: DATA.sectors.map(s => s.weight_portfolio * 100),
+      backgroundColor: PAL.blue,
+      borderRadius: 4,
+      barThickness: 16,
+    }]
+  },
+  options: {
+    indexAxis: 'y',
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => {
+            const s = DATA.sectors[ctx.dataIndex];
+            return s.weight_portfolio ? (s.weight_portfolio*100).toFixed(2) + '% of portfolio  ·  ' + fmtUSD(s.aum) : '';
+          }
+        }
+      }
+    },
+    scales: {
+      x: { ticks: { callback: v => v + '%', color: PAL.muted }, grid: { color: PAL.grid } },
+      y: { ticks: { color: PAL.textPrimary }, grid: { display: false } }
+    }
+  }
+});
+
+new Chart(document.getElementById('chartActiveWeight'), {
+  type: 'bar',
+  data: {
+    labels: DATA.sectors.map(s => s.name),
+    datasets: [{
+      data: DATA.sectors.map(s => s.active_weight * 100),
+      backgroundColor: (ctx) => (ctx.raw >= 0 ? PAL.blue : PAL.red),
+      borderRadius: 4,
+      barThickness: 16,
+    }]
+  },
+  options: {
+    indexAxis: 'y',
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => {
+            const s = DATA.sectors[ctx.dataIndex];
+            return 'Portfolio ' + fmtPct(s.weight_portfolio) + ' vs Benchmark ' + fmtPct(s.weight_benchmark) + ' → ' + fmtPctSigned(s.active_weight);
+          }
+        }
+      }
+    },
+    scales: {
+      x: { ticks: { callback: v => v + '%', color: PAL.muted }, grid: { color: PAL.grid } },
+      y: { ticks: { color: PAL.textPrimary }, grid: { display: false } }
+    }
+  }
+});
+
+// ---- Sector-level tab ----
+const sectorSelect = document.getElementById('sectorSelect');
+DATA.sectors.forEach((s, i) => {
+  const opt = document.createElement('option');
+  opt.value = s.name;
+  opt.textContent = s.name;
+  sectorSelect.appendChild(opt);
+});
+
+let verticalChart = null;
+
+function renderSector(sectorName) {
+  const s = DATA.sectors.find(x => x.name === sectorName);
+  if (!s) return;
+
+  document.getElementById('secAum').textContent = fmtUSD(s.aum);
+  document.getElementById('secHoldings').textContent = s.num_holdings;
+  const activeEl = document.getElementById('secActiveWeight');
+  activeEl.textContent = fmtPctSigned(s.active_weight);
+  activeEl.style.color = s.active_weight >= 0 ? 'var(--delta-good)' : 'var(--delta-bad)';
+  document.getElementById('secWeightInFund').textContent = fmtPct(s.weight_portfolio);
+
+  const tbody = document.getElementById('holdingsTableBody');
+  tbody.innerHTML = s.holdings.map(h => (
+    '<tr>' +
+      '<td class="ticker">' + h.ticker + '</td>' +
+      '<td>' + h.company + '</td>' +
+      '<td class="vertical-name">' + h.vertical + '</td>' +
+      '<td class="num">' + fmtPct(h.weight_in_sector) + '</td>' +
+      '<td class="num">' + fmtPct(h.weight_in_vertical) + '</td>' +
+    '</tr>'
+  )).join('');
+
+  if (verticalChart) verticalChart.destroy();
+  verticalChart = new Chart(document.getElementById('chartVerticalWeight'), {
+    type: 'bar',
+    data: {
+      labels: s.verticals.map(v => v.vertical),
+      datasets: [{
+        data: s.verticals.map(v => v.diff * 100),
+        backgroundColor: (ctx) => (ctx.raw >= 0 ? PAL.blue : PAL.red),
+        borderRadius: 4,
+        barThickness: 16,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const v = s.verticals[ctx.dataIndex];
+              return 'Portfolio ' + fmtPct(v.portfolio_weight_in_sector) + ' vs Benchmark ' + fmtPct(v.benchmark_weight_in_sector) + ' → ' + fmtPctSigned(v.diff);
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { callback: v => v + '%', color: PAL.muted }, grid: { color: PAL.grid } },
+        y: { ticks: { color: PAL.textPrimary }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+sectorSelect.addEventListener('change', () => renderSector(sectorSelect.value));
+renderSector(DATA.sectors[0].name);
+</script>
+</body>
+</html>
