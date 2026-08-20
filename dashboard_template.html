@@ -23,6 +23,7 @@
     --diverge-neg: #e34948;
     --delta-good: #006300;
     --delta-bad: #d03b3b;
+    --excess-line: #4a3aa7;
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
@@ -42,6 +43,7 @@
       --diverge-neg: #e66767;
       --delta-good: #0ca30c;
       --delta-bad: #e66767;
+      --excess-line: #9085e9;
     }
   }
 
@@ -133,7 +135,6 @@
     </div>
     <div class="asof">
       <strong id="asOfLabel">—</strong>
-      <span id="tradeDateLabel"></span>
     </div>
   </div>
 </header>
@@ -155,12 +156,10 @@
       <div class="stat-tile">
         <div class="stat-label">Total AUM</div>
         <div class="stat-value" id="fundAum">—</div>
-        <div class="stat-delta" id="fundAumDelta"></div>
       </div>
       <div class="stat-tile">
         <div class="stat-label">Equity Value</div>
         <div class="stat-value" id="fundEquity">—</div>
-        <div class="stat-delta" id="fundEquityDelta"></div>
       </div>
       <div class="stat-tile">
         <div class="stat-label"># Total Holdings</div>
@@ -344,11 +343,11 @@
 
     <div class="card">
       <h2 id="dailyChartTitle">Cumulative Return</h2>
-      <div class="card-note">Sector vs. benchmark cumulative return, shaded band shows excess return</div>
+      <div class="card-note">Sector and benchmark cumulative return, with cumulative excess return shaded from zero</div>
       <div class="legend-inline">
         <span><span class="legend-swatch" style="background:var(--brand-blue)"></span>Sector Return</span>
         <span><span class="legend-swatch" style="background:var(--brand-orange)"></span>Benchmark Return</span>
-        <span><span class="legend-swatch" style="background:var(--diverge-pos); opacity:.4"></span>Excess Return</span>
+        <span><span class="legend-swatch" style="background:var(--excess-line)"></span>Excess Return</span>
       </div>
       <div class="chart-wrap" style="height:62vh; min-height:420px;"><canvas id="chartDaily"></canvas></div>
     </div>
@@ -391,6 +390,8 @@ const PAL = {
   blue: isDark ? '#3987e5' : '#2a78d6',
   orange: isDark ? '#d95926' : '#eb6834',
   red: isDark ? '#e66767' : '#e34948',
+  excess: isDark ? '#9085e9' : '#4a3aa7',
+  excessFill: isDark ? 'rgba(144,133,233,0.18)' : 'rgba(74,58,167,0.14)',
   textPrimary: isDark ? '#ffffff' : '#0b0b0b',
   textSecondary: isDark ? '#c3c2b7' : '#52514e',
   muted: '#898781',
@@ -414,23 +415,10 @@ function fmtPctSigned(v, digits) {
 }
 
 document.getElementById('asOfLabel').textContent = 'As of ' + DATA.as_of_date;
-document.getElementById('tradeDateLabel').textContent = 'Last trade ' + DATA.trade_date;
 
 document.getElementById('fundAum').textContent = fmtUSD(DATA.fund.total_aum);
 document.getElementById('fundEquity').textContent = fmtUSD(DATA.fund.equity_value);
 document.getElementById('fundHoldings').textContent = DATA.fund.num_holdings;
-
-function renderDelta(elId, startVal, endVal) {
-  const el = document.getElementById(elId);
-  const delta = (endVal || 0) - (startVal || 0);
-  const pct = startVal ? delta / startVal : 0;
-  const sign = delta > 0 ? 'pos' : (delta < 0 ? 'neg' : 'flat');
-  const arrow = delta > 0 ? '▲' : (delta < 0 ? '▼' : '—');
-  el.className = 'stat-delta ' + sign;
-  el.textContent = arrow + ' ' + fmtPctSigned(pct) + ' since last trade';
-}
-renderDelta('fundAumDelta', DATA.fund.total_aum_start, DATA.fund.total_aum);
-renderDelta('fundEquityDelta', DATA.fund.equity_value_start, DATA.fund.equity_value);
 
 // ---- Tab switching ----
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -902,6 +890,7 @@ function renderDaily() {
   const dates = rows.map(r => r.date);
   const sectorCum = cumulativeReturnSeries(rows.map(r => r.sector_return)).map(v => v * 100);
   const benchCum = cumulativeReturnSeries(rows.map(r => r.benchmark_return)).map(v => v * 100);
+  const excessCum = cumulativeReturnSeries(rows.map(r => r.sector_return - r.benchmark_return)).map(v => v * 100);
 
   if (dailyChart) dailyChart.destroy();
   dailyChart = new Chart(document.getElementById('chartDaily'), {
@@ -909,6 +898,17 @@ function renderDaily() {
     data: {
       labels: dates,
       datasets: [
+        {
+          label: 'Excess Return',
+          data: excessCum,
+          borderColor: PAL.excess,
+          backgroundColor: PAL.excessFill,
+          pointRadius: 0,
+          borderWidth: 1.5,
+          tension: 0,
+          fill: 'origin',
+          order: 3,
+        },
         {
           label: 'Benchmark Return',
           data: benchCum,
@@ -924,11 +924,11 @@ function renderDaily() {
           label: 'Sector Return',
           data: sectorCum,
           borderColor: PAL.blue,
-          backgroundColor: isDark ? 'rgba(57,135,229,0.16)' : 'rgba(42,120,214,0.14)',
+          backgroundColor: PAL.blue,
           pointRadius: 0,
           borderWidth: 2,
           tension: 0,
-          fill: 0,
+          fill: false,
           order: 1,
         },
       ]
@@ -941,13 +941,6 @@ function renderDaily() {
         tooltip: {
           callbacks: {
             label: (ctx) => ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(2) + '%',
-            afterBody: (items) => {
-              if (items.length < 2) return '';
-              const s = items.find(i => i.dataset.label === 'Sector Return');
-              const b = items.find(i => i.dataset.label === 'Benchmark Return');
-              if (!s || !b) return '';
-              return 'Excess: ' + (s.parsed.y - b.parsed.y).toFixed(2) + '%';
-            }
           }
         }
       },
