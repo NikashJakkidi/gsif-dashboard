@@ -79,7 +79,7 @@
   .panel { display: none; }
   .panel.active { display: block; }
 
-  .panel-toolbar { display: flex; justify-content: flex-end; align-items: center; margin-bottom: 18px; gap: 10px; }
+  .panel-toolbar { display: flex; justify-content: flex-end; align-items: center; margin-bottom: 18px; gap: 10px; flex-wrap: wrap; }
   .panel-toolbar label { font-size: 13px; color: var(--text-secondary); font-weight: 600; }
   select {
     font-family: inherit; font-size: 14px; padding: 8px 12px; border-radius: 8px;
@@ -142,6 +142,7 @@
   <div class="tabbar-inner">
     <button class="tab-btn active" data-tab="fund">Fund-Wide</button>
     <button class="tab-btn" data-tab="sector">Sector-Level</button>
+    <button class="tab-btn" data-tab="perf">Performance</button>
   </div>
 </nav>
 
@@ -239,9 +240,84 @@
     </div>
   </section>
 
+  <section id="panel-perf" class="panel">
+    <div class="panel-toolbar perf-toolbar">
+      <label for="perfSectorSelect">Sector</label>
+      <select id="perfSectorSelect"></select>
+      <label for="perfStartSelect">From</label>
+      <select id="perfStartSelect"></select>
+      <label for="perfEndSelect">To</label>
+      <select id="perfEndSelect"></select>
+    </div>
+
+    <div class="stat-row" style="grid-template-columns: repeat(3, 1fr);">
+      <div class="stat-tile">
+        <div class="stat-label">Sector Return</div>
+        <div class="stat-value" id="perfSectorReturn">—</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Benchmark Return</div>
+        <div class="stat-value" id="perfBenchReturn">—</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Excess Return</div>
+        <div class="stat-value" id="perfExcessReturn">—</div>
+      </div>
+    </div>
+
+    <div class="chart-row">
+      <div class="card">
+        <h2>Holdings Return</h2>
+        <div class="card-note">Snapshot of holdings as of the "To" month, returns compounded over the selected range</div>
+        <div style="max-height:420px; overflow-y:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Company</th>
+                <th>Vertical</th>
+                <th class="num">Absolute Return</th>
+                <th class="num">Excess vs. Vertical</th>
+                <th class="num">Excess vs. Sector</th>
+              </tr>
+            </thead>
+            <tbody id="perfHoldingsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Vertical Return</h2>
+        <div class="card-note">Verticals held as of the "To" month, compounded over the selected range</div>
+        <div style="max-height:420px; overflow-y:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Vertical</th>
+                <th class="num">GSIF Return</th>
+                <th class="num">Benchmark Return</th>
+                <th class="num">Security Selection</th>
+              </tr>
+            </thead>
+            <tbody id="perfVerticalTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h2>Monthly Excess Return</h2>
+      <div class="card-note">Sector portfolio return minus benchmark return, by month</div>
+      <div class="legend-inline">
+        <span><span class="legend-swatch" style="background:var(--diverge-pos)"></span>Positive</span>
+        <span><span class="legend-swatch" style="background:var(--diverge-neg)"></span>Negative</span>
+      </div>
+      <div class="chart-wrap" style="height:320px;"><canvas id="chartPerfExcess"></canvas></div>
+    </div>
+  </section>
+
 </main>
 
-<footer>Data sourced from the GSIF Official Portfolio Tracker and S&amp;P 1000 Tracker (locked, read-only workbooks). Figures reflect end-point values as of the date above.</footer>
+<footer>Data sourced from the GSIF Official Portfolio Tracker, S&amp;P 1000 Tracker, and Performance Tracker (locked, read-only workbooks). Figures reflect end-point values as of the date above.</footer>
 
 <script>
 const DATA = __DASHBOARD_DATA__;
@@ -436,6 +512,248 @@ function renderSector(sectorName) {
 
 sectorSelect.addEventListener('change', () => renderSector(sectorSelect.value));
 renderSector(DATA.sectors[0].name);
+
+// ---- Performance / Attribution tab ----
+const PERF = DATA.performance;
+
+function fmtPctOrDash(v, digits) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  return fmtPctSigned(v, digits);
+}
+
+function perfFlatEntry(month, ticker) {
+  const m = PERF.data[month];
+  return m ? m.flat[ticker] : undefined;
+}
+function perfSectorBlock(month, sector) {
+  const m = PERF.data[month];
+  return (m && m.sectors[sector]) || [];
+}
+function monthsInRange(startMonth, endMonth) {
+  const all = PERF.months;
+  const si = all.indexOf(startMonth), ei = all.indexOf(endMonth);
+  return all.slice(si, ei + 1);
+}
+function cumulativeFromSeries(series) {
+  const vals = series.filter(v => v !== null && v !== undefined);
+  if (!vals.length) return null;
+  let product = 1;
+  vals.forEach(v => { product *= (1 + v); });
+  return product - 1;
+}
+
+function tickerAbsoluteSeries(ticker, months) {
+  return months.map(m => {
+    const e = perfFlatEntry(m, ticker);
+    return e ? e.return : null;
+  });
+}
+function tickerVerticalBenchmarkSeries(ticker, sector, months) {
+  return months.map(m => {
+    const f = perfFlatEntry(m, ticker);
+    if (!f) return null;
+    const row = perfSectorBlock(m, sector).find(r => r.ticker === ticker);
+    if (!row || row.security_selection === null || row.security_selection === undefined) return null;
+    return f.return - row.security_selection;
+  });
+}
+function tickerSectorBenchmarkSeries(ticker, months) {
+  return months.map(m => {
+    const f = perfFlatEntry(m, ticker);
+    if (!f || f.excess_return === null || f.excess_return === undefined) return null;
+    return f.return - f.excess_return;
+  });
+}
+
+function sectorBenchmarkForMonth(sector, month) {
+  const block = perfSectorBlock(month, sector);
+  for (const r of block) {
+    if (r.excess_vs_sector === null || r.excess_vs_sector === undefined) continue;
+    const f = perfFlatEntry(month, r.ticker);
+    if (f) return f.return - r.excess_vs_sector;
+  }
+  return null;
+}
+function sectorBenchmarkSeries(sector, months) {
+  return months.map(m => sectorBenchmarkForMonth(sector, m));
+}
+function sectorPortfolioSeries(sector, months) {
+  return months.map(m => {
+    const block = perfSectorBlock(m, sector);
+    if (!block.length) return null;
+    const bench = sectorBenchmarkForMonth(sector, m);
+    if (bench === null) return null;
+    let total = 0;
+    block.forEach(r => {
+      if (r.weight === null || r.weight === undefined || r.excess_vs_sector === null || r.excess_vs_sector === undefined) return;
+      total += r.weight * (r.excess_vs_sector + bench);
+    });
+    return total;
+  });
+}
+
+function verticalPortfolioSeries(sector, vertical, months) {
+  return months.map(m => {
+    const block = perfSectorBlock(m, sector).filter(r => r.vertical === vertical);
+    if (!block.length) return null;
+    const vWeight = block.reduce((s, r) => s + (r.weight || 0), 0);
+    if (!vWeight) return null;
+    let total = 0;
+    block.forEach(r => {
+      const f = perfFlatEntry(m, r.ticker);
+      if (!f || f.return === null || f.return === undefined) return;
+      total += (r.weight / vWeight) * f.return;
+    });
+    return total;
+  });
+}
+function verticalBenchmarkSeries(sector, vertical, months) {
+  return months.map(m => {
+    const block = perfSectorBlock(m, sector).filter(r => r.vertical === vertical);
+    const weighted = block.find(r => r.weight);
+    const candidates = weighted ? [weighted, ...block] : block;
+    for (const r of candidates) {
+      if (r.security_selection === null || r.security_selection === undefined) continue;
+      const f = perfFlatEntry(m, r.ticker);
+      if (f) return f.return - r.security_selection;
+    }
+    return null;
+  });
+}
+
+const perfSectorSelect = document.getElementById('perfSectorSelect');
+const perfStartSelect = document.getElementById('perfStartSelect');
+const perfEndSelect = document.getElementById('perfEndSelect');
+let perfExcessChart = null;
+
+PERF.sector_names.forEach(s => {
+  const o = document.createElement('option');
+  o.value = s; o.textContent = s;
+  perfSectorSelect.appendChild(o);
+});
+PERF.months.forEach(m => {
+  const o1 = document.createElement('option');
+  o1.value = m; o1.textContent = m;
+  perfStartSelect.appendChild(o1);
+  const o2 = document.createElement('option');
+  o2.value = m; o2.textContent = m;
+  perfEndSelect.appendChild(o2);
+});
+perfSectorSelect.value = PERF.sector_names.includes('Materials') ? 'Materials' : PERF.sector_names[0];
+perfStartSelect.value = PERF.months[0];
+perfEndSelect.value = PERF.months[PERF.months.length - 1];
+
+function clampPerfRange(changed) {
+  const si = PERF.months.indexOf(perfStartSelect.value);
+  const ei = PERF.months.indexOf(perfEndSelect.value);
+  if (si > ei) {
+    if (changed === 'start') perfEndSelect.value = perfStartSelect.value;
+    else perfStartSelect.value = perfEndSelect.value;
+  }
+}
+
+function renderPerf() {
+  const sector = perfSectorSelect.value;
+  const startMonth = perfStartSelect.value;
+  const endMonth = perfEndSelect.value;
+  const months = monthsInRange(startMonth, endMonth);
+
+  const portSeries = sectorPortfolioSeries(sector, months);
+  const benchSeries = sectorBenchmarkSeries(sector, months);
+  const sectorReturn = cumulativeFromSeries(portSeries);
+  const benchReturn = cumulativeFromSeries(benchSeries);
+  const excessReturn = (sectorReturn !== null && benchReturn !== null) ? sectorReturn - benchReturn : null;
+
+  document.getElementById('perfSectorReturn').textContent = fmtPctOrDash(sectorReturn);
+  document.getElementById('perfBenchReturn').textContent = fmtPctOrDash(benchReturn);
+  const excessEl = document.getElementById('perfExcessReturn');
+  excessEl.textContent = fmtPctOrDash(excessReturn);
+  excessEl.style.color = (excessReturn === null) ? 'var(--text-primary)' : (excessReturn >= 0 ? 'var(--delta-good)' : 'var(--delta-bad)');
+
+  const endBlock = perfSectorBlock(endMonth, sector);
+  const holdingsRows = endBlock.map(r => {
+    const abs = cumulativeFromSeries(tickerAbsoluteSeries(r.ticker, months));
+    const vertBench = cumulativeFromSeries(tickerVerticalBenchmarkSeries(r.ticker, sector, months));
+    const sectBench = cumulativeFromSeries(tickerSectorBenchmarkSeries(r.ticker, months));
+    const flatEnd = perfFlatEntry(endMonth, r.ticker);
+    return {
+      ticker: r.ticker,
+      company: flatEnd ? flatEnd.company : '',
+      vertical: r.vertical,
+      absolute: abs,
+      excessVertical: (abs !== null && vertBench !== null) ? abs - vertBench : null,
+      excessSector: (abs !== null && sectBench !== null) ? abs - sectBench : null,
+    };
+  });
+  holdingsRows.sort((a, b) => (b.absolute === null ? -Infinity : b.absolute) - (a.absolute === null ? -Infinity : a.absolute));
+
+  document.getElementById('perfHoldingsTableBody').innerHTML = holdingsRows.map(h => (
+    '<tr>' +
+      '<td class="ticker">' + h.ticker + '</td>' +
+      '<td>' + (h.company || '') + '</td>' +
+      '<td class="vertical-name">' + (h.vertical || '') + '</td>' +
+      '<td class="num">' + fmtPctOrDash(h.absolute) + '</td>' +
+      '<td class="num">' + fmtPctOrDash(h.excessVertical) + '</td>' +
+      '<td class="num">' + fmtPctOrDash(h.excessSector) + '</td>' +
+    '</tr>'
+  )).join('');
+
+  const verticalsInEnd = [...new Set(endBlock.map(r => r.vertical).filter(Boolean))];
+  const vertRows = verticalsInEnd.map(v => {
+    const port = cumulativeFromSeries(verticalPortfolioSeries(sector, v, months));
+    const bench = cumulativeFromSeries(verticalBenchmarkSeries(sector, v, months));
+    const secSel = (port !== null && bench !== null) ? port - bench : null;
+    return { vertical: v, port, bench, secSel };
+  });
+  vertRows.sort((a, b) => (b.secSel === null ? -Infinity : b.secSel) - (a.secSel === null ? -Infinity : a.secSel));
+
+  document.getElementById('perfVerticalTableBody').innerHTML = vertRows.map(v => (
+    '<tr>' +
+      '<td class="vertical-name">' + v.vertical + '</td>' +
+      '<td class="num">' + fmtPctOrDash(v.port) + '</td>' +
+      '<td class="num">' + fmtPctOrDash(v.bench) + '</td>' +
+      '<td class="num">' + fmtPctOrDash(v.secSel) + '</td>' +
+    '</tr>'
+  )).join('');
+
+  const monthlyExcess = months.map((m, i) => {
+    const p = portSeries[i], b = benchSeries[i];
+    return (p !== null && b !== null) ? (p - b) * 100 : null;
+  });
+
+  if (perfExcessChart) perfExcessChart.destroy();
+  perfExcessChart = new Chart(document.getElementById('chartPerfExcess'), {
+    type: 'bar',
+    data: {
+      labels: months,
+      datasets: [{
+        data: monthlyExcess,
+        backgroundColor: (ctx) => (ctx.raw === null ? PAL.grid : (ctx.raw >= 0 ? PAL.blue : PAL.red)),
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => ctx.raw === null ? 'No data' : ctx.raw.toFixed(2) + '% excess'
+          }
+        }
+      },
+      scales: {
+        y: { ticks: { callback: v => v + '%', color: PAL.muted }, grid: { color: PAL.grid } },
+        x: { ticks: { color: PAL.textPrimary, maxRotation: 45, minRotation: 45 }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+perfSectorSelect.addEventListener('change', renderPerf);
+perfStartSelect.addEventListener('change', () => { clampPerfRange('start'); renderPerf(); });
+perfEndSelect.addEventListener('change', () => { clampPerfRange('end'); renderPerf(); });
+renderPerf();
 </script>
 </body>
 </html>

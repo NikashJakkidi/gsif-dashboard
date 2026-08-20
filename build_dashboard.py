@@ -7,6 +7,7 @@ import openpyxl
 
 GSIF_TRACKER_PATH = r"C:\Users\nikas\OneDrive - University of Florida\GSIF General Body Archive (2026)\Portfolio Tools\GSIF Official Portfolio Tracker.xlsx"
 SP1000_TRACKER_PATH = r"C:\Users\nikas\OneDrive - University of Florida\GSIF General Body Archive (2026)\Portfolio Tools\S&P 1000 Tracker.xlsx"
+PERF_TRACKER_PATH = r"C:\Users\nikas\OneDrive - University of Florida\GSIF General Body Archive (2026)\Portfolio Tools\Performance Tracker.xlsx"
 OUTPUT_HTML = Path(__file__).parent / "index.html"
 
 TICKER, COMPANY, SECTOR, SUBIND, VERTICAL = 1, 3, 4, 6, 7
@@ -15,6 +16,14 @@ LABEL_COL, VAL_A_COL, VAL_B_COL = 24, 25, 26
 
 VERT_SECTOR_COL, VERT_VERTICAL_COL, VERT_WEIGHT_COL = 11, 12, 13
 BENCH_SECTOR_COL, BENCH_WEIGHT_COL = 15, 16
+
+PERF_SECTOR_NAMES = [
+    "Energy", "Utilities", "Industrials", "Materials", "Consumer Discretionary",
+    "Consumer Staples", "Health Care", "Financials", "Real Estate",
+    "Information Technology", "Communication Services",
+]
+PERF_NONRDP, PERF_SECTOR, PERF_VERTICAL = 3, 4, 7
+PERF_RETURN, PERF_EXCESS, PERF_COMPANY = 11, 12, 13
 
 
 def load_gsif_data(path):
@@ -86,6 +95,64 @@ def load_sp1000_data(path):
         row += 1
 
     return vertical_weight_in_sector, sector_weight_in_benchmark
+
+
+def parse_month_name(name):
+    try:
+        return datetime.strptime(name, "%B %Y")
+    except ValueError:
+        return None
+
+
+def load_performance_data(path):
+    wb = openpyxl.load_workbook(path, data_only=True)
+    months = sorted(
+        (n for n in wb.sheetnames if parse_month_name(n)),
+        key=parse_month_name,
+    )
+
+    by_month = {}
+    for month in months:
+        ws = wb[month]
+
+        flat = {}
+        row = 3
+        while ws.cell(row, PERF_NONRDP).value:
+            ticker = ws.cell(row, PERF_NONRDP).value
+            flat[ticker] = {
+                "sector": ws.cell(row, PERF_SECTOR).value,
+                "vertical": ws.cell(row, PERF_VERTICAL).value,
+                "return": ws.cell(row, PERF_RETURN).value,
+                "excess_return": ws.cell(row, PERF_EXCESS).value,
+                "company": ws.cell(row, PERF_COMPANY).value,
+            }
+            row += 1
+
+        sector_anchors = {}
+        for col in range(1, ws.max_column + 1):
+            v = ws.cell(2, col).value
+            if v in PERF_SECTOR_NAMES:
+                sector_anchors[v] = col
+
+        sectors = {}
+        for sector_name, anchor in sector_anchors.items():
+            rows = []
+            row = 4
+            while ws.cell(row, anchor).value:
+                rows.append({
+                    "ticker": ws.cell(row, anchor).value,
+                    "vertical": ws.cell(row, anchor + 1).value,
+                    "weight": ws.cell(row, anchor + 2).value,
+                    "security_selection": ws.cell(row, anchor + 3).value,
+                    "vertical_selection": ws.cell(row, anchor + 4).value,
+                    "excess_vs_sector": ws.cell(row, anchor + 5).value,
+                })
+                row += 1
+            sectors[sector_name] = rows
+
+        by_month[month] = {"flat": flat, "sectors": sectors}
+
+    return {"months": months, "sector_names": PERF_SECTOR_NAMES, "data": by_month}
 
 
 def to_date_str(value):
@@ -162,6 +229,7 @@ def build_dashboard_data():
             "num_holdings": len(holdings),
         },
         "sectors": sectors,
+        "performance": load_performance_data(PERF_TRACKER_PATH),
     }
 
 
