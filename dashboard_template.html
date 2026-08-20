@@ -145,6 +145,7 @@
     <button class="tab-btn" data-tab="sector">Sector-Level</button>
     <button class="tab-btn" data-tab="perf">Performance</button>
     <button class="tab-btn" data-tab="daily">Daily Risk/Returns</button>
+    <button class="tab-btn" data-tab="leaders">Top/Bottom Performers</button>
     <button class="tab-btn" data-tab="mapping">Vertical Mapping</button>
   </div>
 </nav>
@@ -350,6 +351,56 @@
         <span><span class="legend-swatch" style="background:var(--excess-line)"></span>Excess Return</span>
       </div>
       <div class="chart-wrap" style="height:62vh; min-height:420px;"><canvas id="chartDaily"></canvas></div>
+    </div>
+  </section>
+
+  <section id="panel-leaders" class="panel">
+    <div class="panel-toolbar">
+      <label for="leadersStartSelect">From</label>
+      <select id="leadersStartSelect"></select>
+      <label for="leadersEndSelect">To</label>
+      <select id="leadersEndSelect"></select>
+    </div>
+
+    <div class="chart-row">
+      <div class="card">
+        <h2>Top 10 by Excess vs. Sector</h2>
+        <div class="card-note">Best-performing holdings fund-wide, ranked by excess return vs. their sector benchmark</div>
+        <div style="max-height:520px; overflow-y:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Company</th>
+                <th>Sector</th>
+                <th>Vertical</th>
+                <th class="num">Excess vs. Sector</th>
+                <th class="num">Excess vs. Vertical</th>
+              </tr>
+            </thead>
+            <tbody id="leadersTopTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Bottom 10 by Excess vs. Sector</h2>
+        <div class="card-note">Worst-performing holdings fund-wide, ranked by excess return vs. their sector benchmark</div>
+        <div style="max-height:520px; overflow-y:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Company</th>
+                <th>Sector</th>
+                <th>Vertical</th>
+                <th class="num">Excess vs. Sector</th>
+                <th class="num">Excess vs. Vertical</th>
+              </tr>
+            </thead>
+            <tbody id="leadersBottomTableBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -962,6 +1013,80 @@ dailyEndInput.addEventListener('change', () => {
   renderDaily();
 });
 renderDaily();
+
+// ---- Top/Bottom Performers tab ----
+const leadersStartSelect = document.getElementById('leadersStartSelect');
+const leadersEndSelect = document.getElementById('leadersEndSelect');
+
+PERF.months.forEach(m => {
+  const o1 = document.createElement('option');
+  o1.value = m; o1.textContent = m;
+  leadersStartSelect.appendChild(o1);
+  const o2 = document.createElement('option');
+  o2.value = m; o2.textContent = m;
+  leadersEndSelect.appendChild(o2);
+});
+leadersStartSelect.value = PERF.months[0];
+leadersEndSelect.value = PERF.months[PERF.months.length - 1];
+
+function clampLeadersRange(changed) {
+  const si = PERF.months.indexOf(leadersStartSelect.value);
+  const ei = PERF.months.indexOf(leadersEndSelect.value);
+  if (si > ei) {
+    if (changed === 'start') leadersEndSelect.value = leadersStartSelect.value;
+    else leadersStartSelect.value = leadersEndSelect.value;
+  }
+}
+
+function leadersRow(html, r) {
+  return html +
+    '<tr>' +
+      '<td class="ticker">' + r.ticker + '</td>' +
+      '<td>' + (r.company || '') + '</td>' +
+      '<td>' + (r.sector || '') + '</td>' +
+      '<td class="vertical-name">' + (r.vertical || '') + '</td>' +
+      '<td class="num">' + fmtPctOrDash(r.excessSector) + '</td>' +
+      '<td class="num">' + fmtPctOrDash(r.excessVertical) + '</td>' +
+    '</tr>';
+}
+
+function renderLeaders() {
+  const startMonth = leadersStartSelect.value;
+  const endMonth = leadersEndSelect.value;
+  const months = monthsInRange(startMonth, endMonth);
+
+  const rows = [];
+  PERF.sector_names.forEach(sector => {
+    perfSectorBlock(endMonth, sector).forEach(r => {
+      const abs = cumulativeFromSeries(tickerAbsoluteSeries(r.ticker, months));
+      const vertBench = cumulativeFromSeries(tickerVerticalBenchmarkSeries(r.ticker, sector, months));
+      const sectBench = cumulativeFromSeries(tickerSectorBenchmarkSeries(r.ticker, months));
+      const flatEnd = perfFlatEntry(endMonth, r.ticker);
+      const excessVertical = (abs !== null && vertBench !== null) ? abs - vertBench : null;
+      const excessSector = (abs !== null && sectBench !== null) ? abs - sectBench : null;
+      if (excessSector === null) return;
+      rows.push({
+        ticker: r.ticker,
+        company: flatEnd ? flatEnd.company : '',
+        sector: sector,
+        vertical: r.vertical,
+        excessVertical: excessVertical,
+        excessSector: excessSector,
+      });
+    });
+  });
+
+  rows.sort((a, b) => b.excessSector - a.excessSector);
+  const top10 = rows.slice(0, 10);
+  const bottom10 = rows.slice(-10).sort((a, b) => a.excessSector - b.excessSector);
+
+  document.getElementById('leadersTopTableBody').innerHTML = top10.reduce(leadersRow, '');
+  document.getElementById('leadersBottomTableBody').innerHTML = bottom10.reduce(leadersRow, '');
+}
+
+leadersStartSelect.addEventListener('change', () => { clampLeadersRange('start'); renderLeaders(); });
+leadersEndSelect.addEventListener('change', () => { clampLeadersRange('end'); renderLeaders(); });
+renderLeaders();
 
 // ---- Vertical Mapping tab ----
 const MAPPING = DATA.vertical_mapping;
